@@ -39,7 +39,7 @@ func setupSwiftly(theDBName:String)->(DBAccessError?,SwiftlyDB?){
         anError = DBAccessError(errorDescription: "Unable to open database")
     }
     else{
-        theSwiftly = SwiftlyDB(db:theDB, queue: dispatch_queue_create("com.barney.lee.swiftlydb", DISPATCH_QUEUE_CONCURRENT))
+        theSwiftly = SwiftlyDB(db:theDB, queue: dispatch_queue_create("com.barney.lee.swiftlydb", DISPATCH_QUEUE_SERIAL))
     }
     return (anError,theSwiftly)
 }
@@ -52,7 +52,7 @@ func swiftlyTransact(aSwiftlyDB:SwiftlyDB, sql:String, parameters:Array<Storable
     //check if select. if not dispatch_barrier to start and complete a transaction
     
     dispatch_retain(aSwiftlyDB.queue)
-    dispatch_barrier_async(aSwiftlyDB.queue){
+    dispatch_async(aSwiftlyDB.queue){
         if sql.isSelect{
             let(tupleError,tupleResult:AnyObject?) = execRaw(aSwiftlyDB, sql, parameters, true)
             if resultHandler != nil{
@@ -100,7 +100,7 @@ func swiftlyTransactAll(aSwiftlyDB:SwiftlyDB, tasks:Array<Dictionary<String,Arra
     //rather than check if any of the statements are !select statements assume at least one is not. Therefore
     //dispatch_barrier to start and complete a transaction
     dispatch_retain(aSwiftlyDB.queue)
-    dispatch_barrier_async(aSwiftlyDB.queue){
+    dispatch_async(aSwiftlyDB.queue){
         var tupleError:DBAccessError?
         var tupleResult = [AnyObject]()
         //begin transaction
@@ -161,13 +161,19 @@ internal func prepareAndBind(aSqliteDB:COpaquePointer, sql:String, parameters:Ar
         for index in 0..<parameters!.count{
             let parameter:Storable = parameters![index]
             if parameter is String{
-                let result = sqlite3_bind_text(preparedStatement, Int32(index + 1), (parameter.asString() as NSString).UTF8String, -1, SQLITE_TRANSIENT)
+                let result = sqlite3_bind_text(preparedStatement, Int32(index + 1), (parameter.asString()! as NSString).UTF8String, -1, SQLITE_TRANSIENT)
             }
             else if parameter is Double{
-                let result = sqlite3_bind_double(preparedStatement, Int32(index + 1), parameter.asDouble())
+                let doubleOptional = parameter.asDouble()
+                if doubleOptional != nil{
+                    let result = sqlite3_bind_double(preparedStatement, Int32(index + 1), doubleOptional!)
+                }
             }
             else if parameter is Int{
-                let result = sqlite3_bind_int(preparedStatement, Int32(index + 1), (parameter.asInt() as NSNumber).intValue)
+                let intOptional = parameter.asInt()
+                if intOptional != nil{
+                    let result = sqlite3_bind_int(preparedStatement, Int32(index + 1), (intOptional! as NSNumber).intValue)
+                }
             }
             else{
                 errorString = "parameter \(parameter) is an unsupported type"
