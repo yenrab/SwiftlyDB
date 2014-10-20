@@ -63,13 +63,13 @@ func discardSwiftly(theSwiftlyDB:SwiftlyDB){
     sqlite3_close(theSwiftlyDB.db)
 }
 
-func swiftlyTransact(aSwiftlyDB:SwiftlyDB, sql:String, parameters:Array<Storable>?, resultHandler:((DBAccessError?, AnyObject?) ->())?) -> (){
+func swiftlyTransact(aSwiftlyDB:SwiftlyDB, sql:String, parameters:Array<Storable>?, resultHandler:((DBAccessError?, Any?) ->())?) -> (){
     //check if select. if not dispatch_barrier to start and complete a transaction
     
     dispatch_retain(aSwiftlyDB.queue)
     dispatch_async(aSwiftlyDB.queue){
         if sql.isSelect{
-            let(tupleError,tupleResult:AnyObject?) = execRaw(aSwiftlyDB, sql, parameters, true)
+            let(tupleError,tupleResult:Any?) = execRaw(aSwiftlyDB, sql, parameters, true)
             if resultHandler != nil{
                 dispatch_async(dispatch_get_main_queue()){
                     resultHandler!(tupleError, tupleResult)
@@ -78,7 +78,7 @@ func swiftlyTransact(aSwiftlyDB:SwiftlyDB, sql:String, parameters:Array<Storable
         }
         else{
             var tupleError:DBAccessError?
-            var tupleResult:AnyObject?
+            var tupleResult:Any?
             
             if sqlite3_exec(aSwiftlyDB.db, "BEGIN EXCLUSIVE TRANSACTION", nil, nil, nil) != SQLITE_OK{
                 let error = sqlite3_errmsg(aSwiftlyDB.db)
@@ -86,7 +86,7 @@ func swiftlyTransact(aSwiftlyDB:SwiftlyDB, sql:String, parameters:Array<Storable
                 tupleError = DBAccessError(errorDescription: "Unable to begin transaction. (\(errorString!))")
             }
             else{
-                let (error, result:AnyObject?) = execRaw(aSwiftlyDB, sql, parameters, sql.isSelect)
+                let (error, result:Any?) = execRaw(aSwiftlyDB, sql, parameters, sql.isSelect)
                 //end transaction
                 if error != nil || sqlite3_exec(aSwiftlyDB.db, "END TRANSACTION", nil, nil, nil) != SQLITE_OK{
                     //!!!pull the database error out here and use it in the error description!!!
@@ -111,13 +111,13 @@ func swiftlyTransact(aSwiftlyDB:SwiftlyDB, sql:String, parameters:Array<Storable
 
 //change this so it only executes the result handler after all tasks have been completed.
 
-func swiftlyTransactAll(aSwiftlyDB:SwiftlyDB, tasks:Array<Dictionary<String,Array<Storable>?>>,resultHandler:((DBAccessError?, [AnyObject]?) ->())?) -> (){
+func swiftlyTransactAll(aSwiftlyDB:SwiftlyDB, tasks:Array<Dictionary<String,Array<Storable>?>>,resultHandler:((DBAccessError?, [Any]?) ->())?) -> (){
     //rather than check if any of the statements are !select statements assume at least one is not. Therefore
     //dispatch_barrier to start and complete a transaction
     dispatch_retain(aSwiftlyDB.queue)
     dispatch_async(aSwiftlyDB.queue){
         var tupleError:DBAccessError?
-        var tupleResult = [AnyObject]()
+        var tupleResult = [Any]()
         //begin transaction
         if sqlite3_exec(aSwiftlyDB.db, "BEGIN EXCLUSIVE TRANSACTION", nil, nil, nil) != SQLITE_OK{
             let error = sqlite3_errmsg(aSwiftlyDB.db)
@@ -131,7 +131,7 @@ func swiftlyTransactAll(aSwiftlyDB:SwiftlyDB, tasks:Array<Dictionary<String,Arra
                 //there is only one key in the dictionary, the sql.
                 let sql = keyList.first!
                 let parameters = task[sql]
-                let (error:DBAccessError?, result: AnyObject?) = execRaw(aSwiftlyDB, sql, parameters?, sql.isSelect)
+                let (error:DBAccessError?, result: Any?) = execRaw(aSwiftlyDB, sql, parameters?, sql.isSelect)
                 if error != nil{
                     tupleError = error
                     break
@@ -199,9 +199,9 @@ internal func prepareAndBind(aSqliteDB:COpaquePointer, sql:String, parameters:Ar
     return (preparedStatement, errorString)
 }
 
-internal func execRaw(swiftlyDB:SwiftlyDB, sql:String, parameters:Array<Storable>?, isSelect:Bool) ->(DBAccessError?,AnyObject?){
+internal func execRaw(swiftlyDB:SwiftlyDB, sql:String, parameters:Array<Storable>?, isSelect:Bool) ->(DBAccessError?,Any?){
     var dbError:DBAccessError?
-    var result:AnyObject?
+    var result:Any?
     let (statement, errorString) = prepareAndBind(swiftlyDB.db, sql, parameters)
     if errorString != nil{
         dbError = DBAccessError(errorDescription: errorString!)
@@ -209,23 +209,43 @@ internal func execRaw(swiftlyDB:SwiftlyDB, sql:String, parameters:Array<Storable
     else{
         if isSelect{
             if statement != nil{
-                var queryResult = Array<Dictionary<String,String>>()
+                var queryResult:Array<Dictionary<String,Any?>> = Array<Dictionary<String,Any?>>()
                 let numColumns = sqlite3_column_count(statement)
                 while sqlite3_step(statement) == SQLITE_ROW{
-                    var row = [String:String]()
+                    var row = [String:Any?]()
                     for index in 0..<numColumns {
                         let fieldName = sqlite3_column_name(statement, index)
+                        let columnType = sqlite3_column_type(statement, index)
                         let fieldNameString = String.fromCString(UnsafePointer<CChar>(fieldName))
+                        println("column: \(fieldNameString) type:\(columnType)")
                         let fieldValue = sqlite3_column_text(statement, index)
-                        var fieldValueString:String? = nil
+                        var fieldValueOptional:Any? = nil
                         if fieldValue == nil{
-                            fieldValueString = ""
+                            fieldValueOptional = nil
                         }
                         else{
-                            fieldValueString = String.fromCString(UnsafePointer<CChar>(fieldValue))
+                            if columnType == SQLITE_INTEGER{
+                                let intString = String.fromCString(UnsafePointer<CChar>(fieldValue))
+                                fieldValueOptional = intString?.toInt()
+                                
+                            }
+                            else if columnType == SQLITE_FLOAT{
+                                let doubleStringOptional = String.fromCString(UnsafePointer<CChar>(fieldValue))
+                                if doubleStringOptional != nil{
+                                    let doubleString = (doubleStringOptional! as NSString)
+                                    let aDoubleValueString = (doubleString as NSString)
+                                    fieldValueOptional = aDoubleValueString.doubleValue
+                                }
+                            }
+                            else if columnType == SQLITE_NULL{
+                                fieldValueOptional = nil
+                            }
+                            else{
+                                fieldValueOptional = String.fromCString(UnsafePointer<CChar>(fieldValue))
+                            }
                         }
                         
-                        row[fieldNameString!] = fieldValueString!
+                        row[fieldNameString!] = fieldValueOptional
                     }
                     queryResult.append(row)
                 }
