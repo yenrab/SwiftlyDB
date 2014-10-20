@@ -217,7 +217,6 @@ internal func execRaw(swiftlyDB:SwiftlyDB, sql:String, parameters:Array<Storable
                         let fieldName = sqlite3_column_name(statement, index)
                         let columnType = sqlite3_column_type(statement, index)
                         let fieldNameString = String.fromCString(UnsafePointer<CChar>(fieldName))
-                        println("column: \(fieldNameString) type:\(columnType)")
                         let fieldValue = sqlite3_column_text(statement, index)
                         var fieldValueOptional:Any? = nil
                         if fieldValue == nil{
