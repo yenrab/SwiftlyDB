@@ -63,10 +63,9 @@ func discardSwiftly(theSwiftlyDB:SwiftlyDB){
     sqlite3_close(theSwiftlyDB.db)
 }
 
-func swiftlyTransact(aSwiftlyDB:SwiftlyDB, sql:String, parameters:Array<Storable>?, resultHandler:((DBAccessError?, Any?) ->())?) -> (){
+func swiftlyTransact(aSwiftlyDB:SwiftlyDB, sql:String, parameters:[Storable]?, resultHandler:((DBAccessError?, Any?) ->())?) -> (){
     //check if select. if not dispatch_barrier to start and complete a transaction
     
-    dispatch_retain(aSwiftlyDB.queue)
     dispatch_async(aSwiftlyDB.queue){
         if sql.isSelect{
             let(tupleError,tupleResult:Any?) = execRaw(aSwiftlyDB, sql, parameters, true)
@@ -104,17 +103,15 @@ func swiftlyTransact(aSwiftlyDB:SwiftlyDB, sql:String, parameters:Array<Storable
             }
         }
     }
-    dispatch_release(aSwiftlyDB.queue)
 }
 
 
 
 //change this so it only executes the result handler after all tasks have been completed.
 
-func swiftlyTransactAll(aSwiftlyDB:SwiftlyDB, tasks:Array<Dictionary<String,Array<Storable>?>>,resultHandler:((DBAccessError?, [Any]?) ->())?) -> (){
+func swiftlyTransactAll(aSwiftlyDB:SwiftlyDB, tasks:[[String:[Storable]?]],resultHandler:((DBAccessError?, [Any]?) ->())?) -> (){
     //rather than check if any of the statements are !select statements assume at least one is not. Therefore
     //dispatch_barrier to start and complete a transaction
-    dispatch_retain(aSwiftlyDB.queue)
     dispatch_async(aSwiftlyDB.queue){
         var tupleError:DBAccessError?
         var tupleResult = [Any]()
@@ -155,10 +152,9 @@ func swiftlyTransactAll(aSwiftlyDB:SwiftlyDB, tasks:Array<Dictionary<String,Arra
             }
         }
     }
-    dispatch_release(aSwiftlyDB.queue)
 }
 
-internal func prepareAndBind(aSqliteDB:COpaquePointer, sql:String, parameters:Array<Storable>?) ->(COpaquePointer, String?){
+internal func prepareAndBind(aSqliteDB:COpaquePointer, sql:String, parameters:[Storable]?) ->(COpaquePointer, String?){
     var preparedStatement:COpaquePointer = nil
     var errorString:String?
     if sqlite3_prepare_v2(aSqliteDB, sql, -1, &preparedStatement, nil) != SQLITE_OK{
@@ -199,7 +195,7 @@ internal func prepareAndBind(aSqliteDB:COpaquePointer, sql:String, parameters:Ar
     return (preparedStatement, errorString)
 }
 
-internal func execRaw(swiftlyDB:SwiftlyDB, sql:String, parameters:Array<Storable>?, isSelect:Bool) ->(DBAccessError?,Any?){
+internal func execRaw(swiftlyDB:SwiftlyDB, sql:String, parameters:[Storable]?, isSelect:Bool) ->(DBAccessError?,Any?){
     var dbError:DBAccessError?
     var result:Any?
     let (statement, errorString) = prepareAndBind(swiftlyDB.db, sql, parameters)
@@ -209,7 +205,7 @@ internal func execRaw(swiftlyDB:SwiftlyDB, sql:String, parameters:Array<Storable
     else{
         if isSelect{
             if statement != nil{
-                var queryResult:Array<Dictionary<String,Any?>> = Array<Dictionary<String,Any?>>()
+                var queryResult = [[String:Any?]]()
                 let numColumns = sqlite3_column_count(statement)
                 while sqlite3_step(statement) == SQLITE_ROW{
                     var row = [String:Any?]()
